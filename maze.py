@@ -1,6 +1,5 @@
 from player import Player
 import pygame
-import numpy
 import os
 
 '''Server sends a json file to me (client) that I can read for all info'''
