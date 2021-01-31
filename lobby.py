@@ -1,6 +1,7 @@
 import socket
 import select
 import json
+from util import read_into_buffer
 
 MAX_PLAYERS = 4
 
@@ -8,8 +9,7 @@ MAZE_WIDTH = 30
 MAZE_HEIGHT = 33
 
 HOST = '127.0.0.1'
-GAME_PORT = 1337
-IO_PORT = 1338
+BASE_PORT = 1338
 
 LOBBY_CONNECTING = 1
 LOBBY_READY = 2
@@ -65,12 +65,28 @@ class Lobby:
                 [6, 21],
                 [27, 19]
         ]
-        
+
+        self.buttons = {
+                (10,10):(9,18),
+                (2,15):(16,15),
+                (4,25):(26,3),
+                (12,10):(14,15),
+                (27,22):(11,4),
+                (29,11):(26,23),
+                (30,4):(15,16),
+                (32,23):(15,14)
+        }
+
         # Open Server Sockets
-        self.io_server_socket.bind((HOST, IO_PORT))
+        game_port = BASE_PORT + (self.lobby_id * 2)
+        io_port = BASE_PORT + (self.lobby_id * 2) + 1
+
+        self.io_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.io_server_socket.bind((HOST, io_port))
         self.io_server_socket.listen(4)
         self.io_server_socket.setblocking(0)
-        self.game_server_socket.bind((HOST, GAME_PORT))
+        self.game_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.game_server_socket.bind((HOST, game_port))
         self.game_server_socket.listen(4)
         self.game_server_socket.setblocking(0)
         self.num_connections = 0
@@ -93,6 +109,7 @@ class Lobby:
             # Game Connection
             if sock is self.game_server_socket:
                 game_client, addr = self.game_server_socket.accept()
+                # game_client.setblocking(0)
                 self.game_clients.append(game_client)
                 print("Lobby %s: Game Connection %s" % (str(self.lobby_id), str(addr)))
                 self.num_connections += 1
@@ -118,6 +135,10 @@ class Lobby:
             assigned_player_id += 1
 
         print("Lobby %s: Initiated Game" % str(self.lobby_id))
+
+        for sock in self.game_clients:
+            sock.setblocking(0)
+
         self.status = LOBBY_RUNNING
 
     def update_game(self):
@@ -125,16 +146,100 @@ class Lobby:
         read_sockets, write_sockets, error_sockets = select.select(self.io_clients, [], [], 0.1)
         for sock in read_sockets:
             data = sock.recv(4096)
-            json_data = json.loads(data)
-            player_id = json_data["player"]
-            action = json_data["action"]
-            self.game_logic(player_id, action)
+            # Read input actions and perform them
+            messages = read_into_buffer(data)
+            for message in messages:
+                player_id = message["player"]
+                action = message["action"]
+                self.game_logic(player_id, action)
+
+            # Update cients on game state
+            self.send_game_update_to_clients()
 
     def close(self):
         self.io_server_socket.close()
         self.game_server_socket.close()
 
     def game_logic(self, player_id, action):
+        player = self.players[player_id]
+
+
+        north = [3,6,7,10,11,12,13,15]
+        south = [1,5,8,9,10,12,13,15]
+        east = [4,7,8,9,11,12,14,15]
+        west = [2,5,6,9,10,11,14,15]
+
+
+
+        new_y = player[1]
+        new_x = player[0]
+
+        #movement logic
+        if action == "NORTH":
+            new_y -= 1
+            if new_y > -1:
+                value = self.maze_walls[new_y][new_x]
+
+                if value in north:
+                    player[1] = new_y
+
+                # this is a button that was stepped on
+                elif (value - 15) in north:
+                    player[1] = new_y
+                    self.maze_walls[new_y][new_x] -= 15
+
+                    door_pos = self.buttons[(new_x, new_y)]
+                    self.maze_walls[door_pos[0]][door_pos[1]] -= 30
+
+        if action == "SOUTH":
+            new_y += 1
+            if new_y < MAZE_HEIGHT:
+                value = self.maze_walls[new_y][new_x]
+
+                if value in south:
+                    player[1] = new_y
+
+                # this is a button that was stepped on
+                elif (value - 15) in south:
+                    player[1] = new_y
+                    self.maze_walls[new_y][new_x] -= 15
+
+                    door_pos = self.buttons[(new_x, new_y)]
+                    self.maze_walls[door_pos[0]][door_pos[1]] -= 30
+
+        if action == "WEST":
+            new_x -= 1
+            if new_x > -1:
+                value = self.maze_walls[new_y][new_x]
+
+                if value in west:
+                    player[0] = new_x
+
+                # this is a button that was stepped on
+                elif (value - 15) in west:
+                    player[0] = new_x
+                    self.maze_walls[new_y][new_x] -= 15
+
+                    door_pos = self.buttons[(new_x, new_y)]
+                    self.maze_walls[door_pos[0]][door_pos[1]] -= 30
+
+        if action == "EAST":
+            new_x += 1
+            if new_x < MAZE_WIDTH:
+                value = self.maze_walls[new_y][new_x]
+
+                if (value in east):
+                    player[0] = new_x
+
+                # this is a button that was stepped on
+            elif (value - 15) in east:
+                    player[0] = new_x
+                    self.maze_walls[new_y][new_x] -= 15
+
+                    door_pos = self.buttons[(new_x, new_y)]
+                    self.maze_walls[door_pos[0]][door_pos[1]] -= 30
+
+        self.players[player_id] = player
         # if [victory condition for player_id]:
         #    self.num_connections -= 1 # A player has won
         #    if self.num_connections <= 0:
@@ -151,6 +256,10 @@ class Lobby:
             "players": self.players
         }
         json_data = json.dumps(game_state)
-        for client in self.game_clients:
-            client.send(json_data.encode('ascii'))
+
+        read_sockets, write_sockets, error_sockets = select.select(
+            [], self.game_clients, [], 0.1
+        )
+        for sock in write_sockets:
+            sock.send(json_data.encode('ascii'))
 

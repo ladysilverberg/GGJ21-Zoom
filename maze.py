@@ -30,7 +30,7 @@ class Maze:
             else:
                 index = int(filename.split(".")[0])
             self.images[index] = img
-            
+
         # Initialize PyGame
         pygame.init()
         pygame.display.set_caption("Lost")
@@ -47,6 +47,22 @@ class Maze:
             pos = data["players"][i]
             self.players[i].x_pos = pos[0]
             self.players[i].y_pos = pos[1]
+
+    def get_input(self):
+        events = pygame.event.get()
+        for event in events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_LEFT or event.key == 97:
+                    return "WEST"
+                if event.key == pygame.K_RIGHT or event.key == 100:
+                    return "EAST"
+                if event.key == pygame.K_UP or event.key == 119:
+                    return "NORTH"
+                if event.key == pygame.K_DOWN or event.key == 115:
+                    return "SOUTH"
+                if event.key == pygame.K_SPACE:
+                    return "SPACE"
+        return "NONE"
 
     def draw_board(self):
         self.display.fill((0,0,0))

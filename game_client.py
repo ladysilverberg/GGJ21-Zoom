@@ -13,20 +13,37 @@ import select
 import json
 import sys
 from maze import Maze
+from util import read_into_buffer
 
 HOST = '127.0.0.1'
-PORT = 1337
-IO_PORT = 1338
+MGMT_PORT = 1337
+BASE_PORT = 1338
+
+# Connect to management to get delegated a lobby port
+lobby_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+lobby_socket.connect((HOST, MGMT_PORT))
+print("Connected to Lobby")
+print("Waiting for lobby delegation...")
+json_data = lobby_socket.recv(4096)
+lobby_data = json.loads(json_data.decode('ascii'))
+lobby_id = lobby_data["lobby_id"]
+print("Assigned to Lobby %s" % str(lobby_id))
+game_port = BASE_PORT + (lobby_id * 2)
+io_port = BASE_PORT + (lobby_id * 2) + 1
+
+# TODO: Show title screen
 
 # Connect to I/O Server
 io_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-io_socket.connect((HOST, IO_PORT))
+io_socket.connect((HOST, io_port))
 print("Connected I/O to server")
 
 # Connect to Game Server
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_socket.connect((HOST, PORT))
+client_socket.connect((HOST, game_port))
 print("Connected Game to server")
+
+# TODO: Show instructions screen / waiting screen
 
 # Recieve Initial Game State
 initial_json = client_socket.recv(4096)
@@ -34,25 +51,33 @@ game_state = json.loads(initial_json.decode('ascii'))
 print("Game state recieved")
 client_socket.setblocking(0)
 
-# Start Game
 player_id = game_state["player_id"]
+# Start Game
 maze = Maze(game_state, player_id)
 while True:
+
     # Non-blocking socket read
     read_sockets, write_sockets, error_sockets = select.select([client_socket], [], [], 0.1)
     for sock in read_sockets:
-        data = sock.recv(4096);
-        json_data = json.loads(data)
-        cmd = json_data["command"]
-        if cmd == "quit":
-            io_socket.close()
-            client_socket.close()
-            exit()
-        elif cmd == "update":
-            maze.move_players(json_data)
-        elif cmd == "victory":
-            # Do game victory magic here
-            pass
+        data = sock.recv(4096)
+        messages = read_into_buffer(data)
+        for message in messages:
+            cmd = json_data["command"]
+            if cmd == "quit":
+                io_socket.close()
+                client_socket.close()
+                exit()
+            elif cmd == "update":
+                maze.move_players(json_data)
+            elif cmd == "victory":
+                # Do game victory magic here
+                pass
+
+    # Send input to server
+    action = maze.get_input()
+    if "NONE" not in action:
+        json_data = json.dumps({"player":player_id, "action": maze.get_input()})
+        io_socket.send(json_data.encode('ascii'))
 
     # Render Maze
     maze.draw_board()
