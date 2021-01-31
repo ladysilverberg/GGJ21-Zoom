@@ -8,7 +8,7 @@ MAX_PLAYERS = 4
 MAZE_WIDTH = 30
 MAZE_HEIGHT = 33
 
-HOST = '127.0.0.1'
+HOST = '158.39.200.234'
 BASE_PORT = 1338
 
 LOBBY_CONNECTING = 1
@@ -68,18 +68,23 @@ class Lobby:
 
         self.buttons = {
                 (10,10):(9,18),
-                (2,15):(16,15),
+                (2, 15):(16,15),
                 (4,25):(26,3),
                 (12,10):(14,15),
-                (27,22):(11,4),
-                (29,11):(26,23),
+                (27,23):(11,4),
+                (29,11):(26,19),
                 (30,4):(15,16),
-                (32,23):(15,14)
+                (32,24):(15,14)
         }
+
+        self.buttons_array = [(10, 10), (2, 15), (4, 25), (12, 10), (27, 23), (29, 11), (30, 4), (32, 24)]
+        self.buttons_pressed = [0, 0, 0, 0, 0, 0, 0, 0]
 
         # Open Server Sockets
         game_port = BASE_PORT + (self.lobby_id * 2)
         io_port = BASE_PORT + (self.lobby_id * 2) + 1
+
+        print(io_port)
 
         self.io_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.io_server_socket.bind((HOST, io_port))
@@ -122,7 +127,6 @@ class Lobby:
         initial_state = {
             "width": MAZE_WIDTH,
             "height": MAZE_HEIGHT,
-            "maze_walls": self.maze_walls,
             "players": self.players
         }
 
@@ -160,16 +164,19 @@ class Lobby:
         self.io_server_socket.close()
         self.game_server_socket.close()
 
+    def translate_btn_pos(self, btn_tuple):
+        for i in range(len(self.buttons_array)):
+            if self.buttons == btn_tuple:
+                return i
+        return -1
+
     def game_logic(self, player_id, action):
         player = self.players[player_id]
-
 
         north = [3,6,7,10,11,12,13,15]
         south = [1,5,8,9,10,12,13,15]
         east = [4,7,8,9,11,12,14,15]
         west = [2,5,6,9,10,11,14,15]
-
-
 
         new_y = player[1]
         new_x = player[0]
@@ -187,8 +194,11 @@ class Lobby:
                 elif (value - 15) in north:
                     player[1] = new_y
                     self.maze_walls[new_y][new_x] -= 15
+                    btn_index = self.translate_btn_pos((new_y, new_x))
+                    if btn_index != -1:
+                        self.buttons_pressed[btn_index] = 1
+                    door_pos = self.buttons[(new_y, new_x)]
 
-                    door_pos = self.buttons[(new_x, new_y)]
                     self.maze_walls[door_pos[0]][door_pos[1]] -= 30
 
         if action == "SOUTH":
@@ -203,8 +213,10 @@ class Lobby:
                 elif (value - 15) in south:
                     player[1] = new_y
                     self.maze_walls[new_y][new_x] -= 15
-
-                    door_pos = self.buttons[(new_x, new_y)]
+                    btn_index = self.translate_btn_pos((new_y, new_x))
+                    if btn_index != -1:
+                        self.buttons_pressed[btn_index] = 1
+                    door_pos = self.buttons[(new_y, new_x)]
                     self.maze_walls[door_pos[0]][door_pos[1]] -= 30
 
         if action == "WEST":
@@ -219,8 +231,10 @@ class Lobby:
                 elif (value - 15) in west:
                     player[0] = new_x
                     self.maze_walls[new_y][new_x] -= 15
-
-                    door_pos = self.buttons[(new_x, new_y)]
+                    btn_index = self.translate_btn_pos((new_y, new_x))
+                    if btn_index != -1:
+                        self.buttons_pressed[btn_index] = 1
+                    door_pos = self.buttons[(new_y, new_x)]
                     self.maze_walls[door_pos[0]][door_pos[1]] -= 30
 
         if action == "EAST":
@@ -232,34 +246,33 @@ class Lobby:
                     player[0] = new_x
 
                 # this is a button that was stepped on
-            elif (value - 15) in east:
+                elif (value - 15) in east:
                     player[0] = new_x
                     self.maze_walls[new_y][new_x] -= 15
-
-                    door_pos = self.buttons[(new_x, new_y)]
+                    btn_index = self.translate_btn_pos((new_y, new_x))
+                    if btn_index != -1:
+                        self.buttons_pressed[btn_index] = 1
+                    door_pos = self.buttons[(new_y, new_x)]
                     self.maze_walls[door_pos[0]][door_pos[1]] -= 30
 
         self.players[player_id] = player
-        # if [victory condition for player_id]:
-        #    self.num_connections -= 1 # A player has won
-        #    if self.num_connections <= 0:
-        #        self.status = LOBBY_CLOSED
-        #        self.close() # No players left - close the lobby
 
-        # TODO: Implement this
-        pass
+        done = True
+        for p in self.players:
+            if p != player:
+                done = False
+
+        if done:
+            self.send_game_update_to_clients(command="victory")
+            self.status = LOBBY_CLOSED
+            self.close()
 
     def send_game_update_to_clients(self, command="update"):
         game_state = {
             "command": command,
-            "maze_walls": self.maze_walls,
+            "buttons_pressed": self.buttons_pressed,
             "players": self.players
         }
         json_data = json.dumps(game_state)
-
-        read_sockets, write_sockets, error_sockets = select.select(
-            [], self.game_clients, [], 0.1
-        )
-        for sock in write_sockets:
+        for sock in self.game_clients:
             sock.send(json_data.encode('ascii'))
-

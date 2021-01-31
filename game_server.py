@@ -5,7 +5,7 @@ import select
 import json
 from lobby import Lobby
 
-HOST = '127.0.0.1'
+HOST = '158.39.200.234'
 MGMT_PORT = 1337
 
 MAX_LOBBIES = 25
@@ -39,22 +39,31 @@ while True:
         lobby_data = {
             "lobby_id": lobby_counter
         }
+        # print(lobby_counter)
         json_data = json.dumps(lobby_data)
         lobby_conn.send(json_data.encode('ascii'))
 
     for lobby in lobbies:
-        if lobby.status == LOBBY_CONNECTING:
-            lobby.connect_clients()
-        elif lobby.status == LOBBY_READY:
-            lobby.start_game()
+        try :
+            if lobby.status == LOBBY_CONNECTING:
+                lobby.connect_clients()
+            elif lobby.status == LOBBY_READY:
+                lobby.start_game()
 
-            # Create New Lobby
+                # Create New Lobby
+                if lobby_counter < MAX_LOBBIES:
+                    lobby_counter += 1
+                    new_lobby = Lobby(lobby_counter)
+                    lobbies.append(new_lobby)
+            elif lobby.status == LOBBY_RUNNING:
+                lobby.update_game()
+            elif lobby.status == LOBBY_CLOSED:
+                lobbies.remove(lobby)
+                # lobby_counter -= 1
+        except:
+            lobbies.remove(lobby)
+
             if lobby_counter < MAX_LOBBIES:
                 lobby_counter += 1
                 new_lobby = Lobby(lobby_counter)
                 lobbies.append(new_lobby)
-        elif lobby.status == LOBBY_RUNNING:
-            lobby.update_game()
-        elif lobby.status == LOBBY_CLOSED:
-            lobbies.remove(lobby)
-            lobby_counter -= 1
